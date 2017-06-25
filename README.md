@@ -38,7 +38,7 @@ $ conda install shapely
 ## Running the analysis
 
 The scirpts provided below will try to automatically download the data if it is not located in the disk.
-In addition, analysis can be time consuming, with the more detailed level (neigborhoods) taking several hours to runs
+In addition, analysis can be time consuming, with the more detailed level (neigborhoods) taking several hours to run
 
 To generate the histograms that compare the top level areas (boroughs) of NYC run:
 
@@ -62,7 +62,7 @@ $ python rank_features.py
 ## Notes and TODOs
 
 - [ ] We have re-used code from several existing repositories, for example https://github.com/kthouz/NYC_Green_Taxi
-- [ ] In the current analysis population size is not considered explicitly (due to time limitations). We could resample and average a fixed boostrap size for each area to acount for that
+- [ ] In the current analysis population size is not considered explicitly (due to time limitations). We could resample a fixed boostrap size for each area as a mitigation to that
 - [ ] The feature ranking from tree-based ensembles is biased against categorical predictors (tends to overemphasize continuous predictors). We could do more sophisticated feature ranking  
 - [ ] Since we only run less than 50 neigborhood t-tests it is not critical but if more are run (like the full 266) Bonferroni and similar corrections should be applied to counteract the problem of multiple comparisons 
 
