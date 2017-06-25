@@ -22,6 +22,8 @@ from pprint import pprint
 import collections
 import urllib
 
+import pdb
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -36,7 +38,7 @@ def is_within_bbox(loc,poi):
     return 1*(Point(loc).within(poi))
 
 
-def plot_area_tips_histogram(data,poi,count,area_name='None'):
+def ttest_area_tips(data,poi,count,area_name='None'):
     """
     This function returns 1 if a location loc(lat,lon) is located inside a polygon of interest poi
     poi: shapely.geometry.Polygon, polygon of interest
@@ -56,23 +58,10 @@ def plot_area_tips_histogram(data,poi,count,area_name='None'):
     h1 = np.histogram(v1,bins=bins)
     h2 = np.histogram(v2,bins=bins)
 
-    # generate the plot
-    # First suplot: visualize all data with outliers
-    fig,ax = plt.subplots(1,1,figsize=(10,5))
-    w = .4*(bins[1]-bins[0])
-    ax.bar(bins[:-1],h1[0],width=w,color='b')
-    ax.bar(bins[:-1]+w,h2[0],width=w,color='g')
-    ax.set_yscale('log')
-    ax.set_xlabel('Tip (%)')
-    ax.set_ylabel('Count')
-    ax.set_title('Tip')
-    ax.legend(['Non-Area','Area'],title='origin')
-    filename = 'hist_area_tips_' + area_name + '_' + str(count)
-    plt.savefig(filename,format='jpeg')
     ttest = ttest_ind(v1,v2,equal_var=False)
-    print 't-test results:',  ttest[0], ttest[1]
+    print 't-test results:', ttest[0], ttest[1]
 
-    return ttest
+    return area_name, ttest
 
 
 # Get external geolocation data for geo accosiations
@@ -88,10 +77,6 @@ else: # Download geolocation dataset if not available on disk
 
 dict_level1_len = len(NYC_geo_data['features'])
 
-borough_list = []
-for i in range(dict_level1_len):
-    borough_list.append(NYC_geo_data['features'][i]['properties']['borough'])
-borough_list_unique = list(set(borough_list))
 
 neighborhood_list = []
 for i in range(dict_level1_len):
@@ -116,35 +101,110 @@ data = data[(data.total_amount>=2.5)] #cleaning
 data['tip_percentage'] = 100*data.tip_amount/data.total_amount
 print "Summary: Tip percentage\n",data.tip_percentage.describe()
 
-# prepare dictionary for the boroughs in NYC
-df_boroughs = pd.DataFrame(borough_list_unique)
-df_boroughs = df_boroughs.rename(columns={0: "NYC_borough"}) 
-df_boroughs['poly_list'] = np.empty((len(df_boroughs), 0)).tolist()
-dict_boroughs = df_boroughs.set_index('NYC_borough').to_dict()
+# prepare dictionary for the neighborhoods in NYC
+df_neighborhoods = pd.DataFrame(neighborhood_list)
+df_neighborhoods = df_neighborhoods.rename(columns={0: "NYC_neighborhood"}) 
+df_neighborhoods['ttest_val'] = np.nan
+
+# find multisection neighborhoods
+df_neighborhoods = df_neighborhoods.reset_index()
+ids = df_neighborhoods["NYC_neighborhood"]
+df_neighborhoods[ids.isin(ids[ids.duplicated()])].sort("NYC_neighborhood")
+multisection_areas = df_neighborhoods[ids.isin(ids[ids.duplicated()])].sort("NYC_neighborhood")['NYC_neighborhood'].unique()
+multisection_areas_list = list(multisection_areas)
 
 
-# for every borough collect the points of interest of the respective sub-areas 
-for  i in range(len(neighborhood_list)):   
+# prepare dictionary for the unique neighborhoods in NYC
+df_neighborhoods_unique = pd.DataFrame(neighborhood_list_unique)
+df_neighborhoods_unique = df_neighborhoods_unique.rename(columns={0: "NYC_neighborhood"}) 
+df_neighborhoods_unique['ttest_val'] = np.nan
+df_neighborhoods_unique['ttest_pval'] = np.nan
+dict_neighborhood_unique = df_neighborhoods_unique.set_index('NYC_neighborhood').to_dict()
+
+
+# prepare dictionary for the multisection neighborhoods in NYC
+df_multisection = pd.DataFrame(multisection_areas)
+df_multisection = df_multisection.rename(columns={0: "NYC_multisection"}) 
+df_multisection['poly_list'] = np.empty((len(df_multisection), 0)).tolist()
+dict_multisection = df_multisection.set_index('NYC_multisection').to_dict()
+
+
+
+# for every multisection neighborhood collect the points of interest of the respective sub-areas 
+for i in range(len(multisection_areas)):   
+      multisection_area = multisection_areas[i]
+      for j in range(len(neighborhood_list)):   
+          area_name = NYC_geo_data['features'][j]['properties']['neighborhood']
+          if multisection_area == area_name:
+             poly_indices = NYC_geo_data['features'][j]['geometry']['coordinates']
+             array_dim = np.asarray(poly_indices).shape[1] * np.asarray(poly_indices).shape[2] 
+             poly_indices_array = np.asarray(poly_indices).reshape(array_dim,)
+             poly_indices_list = list(poly_indices_array)
+             it = iter(poly_indices_list)
+             poly_list_of_tuples = zip(it, it)
+             poi = Polygon(poly_list_of_tuples)
+             dict_multisection['poly_list'][multisection_area].append(poi)
+
+
+
+# merge multisection areas and perform ttest
+for  i in range(len(multisection_areas)): 
+      multisection_name = multisection_areas[i]  
+      multisection_poly = cascaded_union(dict_multisection['poly_list'][multisection_name])
+      multisection_poly_conv_hull = multisection_poly.convex_hull
+      multisection_poly_conv_hull_ind = np.asarray(multisection_poly_conv_hull.exterior)
+      multisection_poly_conv_hull_ind[:,[0, 1]] = multisection_poly_conv_hull_ind[:,[1, 0]]
+      multisection_poly_conv_hull = Polygon(multisection_poly_conv_hull_ind)
+      area, ttest = ttest_area_tips(data,poi,i,multisection_name)
+      idx = df_neighborhoods_unique['NYC_neighborhood'] == multisection_name
+      df_neighborhoods_unique.loc[idx,'ttest_val'] = ttest[0]
+      df_neighborhoods_unique.loc[idx,'ttest_pval'] = ttest[1]
+
+
+single_area_neighborhoods = list(set(neighborhood_list_unique) - set(multisection_areas_list)) 
+
+
+# for every non multisection area collect the points of interest of the respective sub-areas and do ttest
+for i in range(len(single_area_neighborhoods)):   
       area_name = NYC_geo_data['features'][i]['properties']['neighborhood']
       borough_name = NYC_geo_data['features'][i]['properties']['borough']
       poly_indices = NYC_geo_data['features'][i]['geometry']['coordinates']
       array_dim = np.asarray(poly_indices).shape[1] * np.asarray(poly_indices).shape[2] 
-      poly_indices_array = np.asarray(poly_indices).reshape(array_dim,)
+      poly_indices_array = np.asarray(poly_indices).reshape(array_dim/2,2)
+      poly_indices_array[:,[0, 1]] = poly_indices_array[:,[1, 0]]
+      poly_indices_array = np.asarray(poly_indices_array).reshape(array_dim,)
       poly_indices_list = list(poly_indices_array)
       it = iter(poly_indices_list)
       poly_list_of_tuples = zip(it, it)
       poi = Polygon(poly_list_of_tuples)
-      dict_boroughs['poly_list'][borough_name].append(poi)
-      
-# create histogram of tip level for each borough (as origin), compared to all other boroughs
-for  i in range(len(borough_list_unique)): 
-      borough_name = borough_list_unique[i]  
-      borough_poly = cascaded_union(dict_boroughs['poly_list'][borough_name])
-      borough_poly_conv_hull = borough_poly.convex_hull
-      borough_poly_conv_hull_ind = np.asarray(borough_poly_conv_hull.exterior)
-      borough_poly_conv_hull_ind[:,[0, 1]] = borough_poly_conv_hull_ind[:,[1, 0]]
-      borough_poly_conv_hull = Polygon(borough_poly_conv_hull_ind)
-      plot_area_tips_histogram(data,borough_poly_conv_hull,i,borough_name)
+   
+      if borough_name == 'Manhattan' or ('Airport' in area_name):
+         area, ttest = ttest_area_tips(data,poi,i,area_name)
+         print (ttest[0])
+         idx = df_neighborhoods['NYC_neighborhood'] == area_name
+         df_neighborhoods_unique.loc[idx,'ttest_val'] = ttest[0] 
+         df_neighborhoods_unique.loc[idx,'ttest_pval'] = ttest[1]
+
+
+df_neighborhoods_unique.sort("ttest_val").to_csv('neighborhood_ttests.csv')
+
+print (df_neighborhoods_unique.sort("ttest_val",ascending=True)[:20])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
