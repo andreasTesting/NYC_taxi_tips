@@ -4,7 +4,7 @@ This repository contains scirpt for analyzing the NYX taxi data with focus on de
 
 ## Installation of required libraries
 
-The stups tooling require Python2 so make sure you do the following:
+Start by installing the basic packages:
 
 ```
 $ sudo apt-get install build-essential
